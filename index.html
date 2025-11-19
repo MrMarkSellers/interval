@@ -3,190 +3,206 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Interval Trainer (Simple Version w/ Timeline)</title>
+<title>Interval Trainer — iOS Styled</title>
 <style>
-    body { font-family: Arial, sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; }
-    h1 { text-align: center; }
-    .section { margin-bottom: 20px; padding: 15px; background: #222; border-radius: 10px; }
-    button { padding: 10px 18px; border: none; border-radius: 8px; cursor: pointer; }
-    .primary { background: #4caf50; color: #fff; }
-    .danger { background: #f44336; color: #fff; margin-left: 10px; }
-    input, select { padding: 10px; border-radius: 6px; border: none; }
-    #timeline .item { background: #333; padding: 10px; border-radius: 8px; margin: 6px 0; display: flex; align-items: center; justify-content: space-between; }
+    :root {
+        --bg: #f2f2f7;
+        --panel: #ffffff;
+        --radius: 18px;
+        --accent: #007aff;
+        --danger: #ff3b30;
+        --text-dark: #1c1c1e;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); margin: 0; padding: 16px; color: var(--text-dark); }
+    h1 { text-align: center; font-weight: 700; }
+    .panel { background: var(--panel); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+    button { padding: 12px 18px; border: none; border-radius: 12px; font-size: 16px; }
+    .primary { background: var(--accent); color: white; }
+    .danger { background: var(--danger); color: white; }
+    input, select { padding: 12px; font-size: 16px; border-radius: 12px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
+    #timeline .item { padding: 12px; background: #f8f8f8; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
     .drag { cursor: grab; font-size: 20px; margin-left: 10px; }
-    #mediaDisplay img, #mediaDisplay video { max-width: 100%; max-height: 80vh; display: block; margin: 0 auto; border-radius: 10px; }
+
+    /* Radial countdown */
+    #radial { width: 160px; height: 160px; margin: 20px auto; position: relative; }
+    #radial svg { transform: rotate(-90deg); }
+    #radial circle { fill: none; stroke-width: 14; stroke-linecap: round; }
+    #radial .bg { stroke: #ddd; }
+    #radial .progress { stroke: var(--accent); transition: stroke-dashoffset 1s linear; }
+    #radial .time { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; font-weight: bold; }
+
+    /* Media fit */
+    #mediaDisplay img, #mediaDisplay video { max-width: 100%; max-height: 70vh; display: block; margin: 0 auto; border-radius: 12px; }
 </style>
 </head>
 <body>
 <h1>Interval Trainer</h1>
 
-<div class="section">
-    <label>Duration per Interval:</label><br>
+<div class="panel">
+    <label>Duration per Interval</label><br>
     <select id="duration">
         <option value="30">30 sec</option>
         <option value="45">45 sec</option>
         <option value="60">60 sec</option>
-    </select>
+    </select><br><br>
 
-    <br><br>
-    <label>Repetitions:</label><br>
+    <label>Repetitions</label>
     <input id="reps" type="number" min="1" max="10" value="1" />
 </div>
 
-<div class="section">
-    <h2>Media (Match Repetitions)</h2>
-    <input type="file" id="fileInput" accept="image/*,video/*" />
-    <button class="primary" onclick="addMedia()">Add</button>
+<div class="panel">
+    <h2>Media Items</h2>
+    <input type="file" id="fileInput" accept="image/*,video/*"><br><br>
+    <button class="primary" onclick="addMedia()">Add Media</button>
 
-    <h3>Timeline (Drag to Reorder)</h3>
+    <h3>Timeline</h3>
     <div id="timeline"></div>
 </div>
 
-<div class="section">
+<div class="panel">
     <h2>Save Sequence</h2>
-    <input id="seqName" placeholder="Sequence Name" />
-    <button class="primary" onclick="saveSequence()">Save</button>
+    <input id="seqName" placeholder="Sequence Name"><br><br>
+    <button class="primary" onclick="saveSequence()">Save Sequence</button>
 
-    <h3>Saved Sequences:</h3>
+    <h3>Saved</h3>
     <div id="sequenceList"></div>
 </div>
 
-<div id="playback" class="section" style="display:none;">
-    <h2 id="playbackTitle">Playback</h2>
-    <div id="countdown" style="font-size:40px;"></div>
+<div id="playback" class="panel" style="display:none; text-align:center;">
+    <h2 id="playbackTitle"></h2>
+    <div id="repInfo"></div>
+
+    <div id="radial">
+        <svg width="160" height="160">
+            <circle class="bg" cx="80" cy="80" r="70"></circle>
+            <circle class="progress" cx="80" cy="80" r="70"></circle>
+        </svg>
+        <div class="time" id="timeText"></div>
+    </div>
+
     <div id="mediaDisplay"></div>
-    <div id="repInfo" style="margin-top:10px;"></div>
-    <button onclick="stopPlayback()">Stop</button>
+
+    <br>
+    <button class="danger" onclick="stopPlayback()">Stop</button>
 </div>
 
 <script>
+// ===== IndexedDB =====
+let db;
+const request = indexedDB.open("IntervalTrainerDB", 1);
+request.onupgradeneeded = e => {
+    db = e.target.result;
+    if (!db.objectStoreNames.contains("media")) db.createObjectStore("media", { keyPath: "id" });
+};
+request.onsuccess = e => { db = e.target.result; loadSequences(); };
+
+// ===== State =====
 let items = [];
 let sequences = JSON.parse(localStorage.getItem("sequences") || "[]");
-let timer = null;
-let currentIndex = 0;
-let timeLeft = 0;
+let timer, currentIndex, timeLeft, currentSequence;
 let dragIndex = null;
-let currentSequence = null;
 
-function addMedia() {
-    const reps = parseInt(document.getElementById('reps').value);
-    if (items.length >= reps) return alert(`You may only add ${reps} items.`);
+// ===== Helpers =====
+const uuid = () => "xxxx-xxxx".replace(/[x]/g,()=> (Math.random()*16|0).toString(16));
 
-    const file = document.getElementById('fileInput').files[0];
-    if (!file) return alert("Choose a file first.");
+function saveMediaToDB(id, file) {
+    db.transaction(["media"],"readwrite").objectStore("media").put({ id, blob:file, name:file.name, type:file.type });
+}
+function getMedia(id) {
+    return new Promise(res=>{
+        let r=db.transaction(["media"],"readonly").objectStore("media").get(id);
+        r.onsuccess=()=>res(r.result);
+    });
+}
 
-    const url = URL.createObjectURL(file);
-    items.push({ type: file.type.startsWith('video') ? 'video' : 'photo', url, name: file.name });
+// ===== Media Add =====
+async function addMedia() {
+    const reps = parseInt(reps.value);
+    if (items.length >= reps) return alert(`Max ${reps} items allowed.`);
 
+    const file = fileInput.files[0];
+    if (!file) return alert("Select a file");
+
+    const id = uuid();
+    saveMediaToDB(id, file);
+    items.push({ id, name:file.name, type:file.type.startsWith("video")?"video":"photo" });
     renderTimeline();
 }
 
+// ===== Timeline =====
 function renderTimeline() {
-    const timeline = document.getElementById('timeline');
     timeline.innerHTML = items.map((m,i)=>`
-        <div class="item" draggable="true" ondragstart="startDrag(${i})" ondragover="event.preventDefault()" ondrop="dropItem(${i})">
-            <span>${i+1}. Stage ${i+1} ${m.name}</span>
+        <div class='item' draggable='true' ondragstart='dragIndex=${i}' ondragover='event.preventDefault()' ondrop='dropItem(${i})'>
+            <span>${i+1}. Stage ${i+1} — ${m.name}</span>
             <div>
-                <button class="danger" onclick="deleteItem(${i})">Delete</button>
-                <span class="drag">☰</span>
+                <button class='danger' onclick='deleteItem(${i})'>Delete</button>
+                <span class='drag'>☰</span>
             </div>
-        </div>
-    `).join('');
+        </div>`).join('');
 }
+function dropItem(i){ const x=items.splice(dragIndex,1)[0]; items.splice(i,0,x); renderTimeline(); }
+function deleteItem(i){ items.splice(i,1); renderTimeline(); }
 
-function deleteItem(i) {
-    items.splice(i,1);
-    renderTimeline();
-}
-
-function startDrag(i) { dragIndex = i; }
-function dropItem(dropIndex) {
-    const moved = items.splice(dragIndex, 1)[0];
-    items.splice(dropIndex, 0, moved);
-    renderTimeline();
-}
-
+// ===== Save / Load =====
 function saveSequence() {
-    const name = document.getElementById('seqName').value;
-    const duration = parseInt(document.getElementById('duration').value);
-    const reps = parseInt(document.getElementById('reps').value);
-
-    if (items.length !== reps) return alert("Media count must match repetitions!");
-
-    sequences.push({ name, duration, repetitions: reps, items: [...items] });
-    localStorage.setItem("sequences", JSON.stringify(sequences));
-
-    loadSequences();
-}
-
-function deleteSequence(i) {
-    sequences.splice(i,1);
+    if (items.length != parseInt(reps.value)) return alert("Media must match repetitions");
+    sequences.push({ name: seqName.value, duration: parseInt(duration.value), items:[...items] });
     localStorage.setItem("sequences", JSON.stringify(sequences));
     loadSequences();
 }
+function deleteSequence(i){ sequences.splice(i,1); localStorage.setItem("sequences",JSON.stringify(sequences)); loadSequences(); }
+function loadSequences(){ sequenceList.innerHTML = sequences.map((s,i)=>`
+    <div style='margin:10px 0;'>
+        <button class='primary' onclick='startSequence(${i})'>${s.name}</button>
+        <button class='danger' onclick='deleteSequence(${i})'>Delete</button>
+    </div>`).join(''); }
 
-function loadSequences() {
-    const list = document.getElementById('sequenceList');
-    list.innerHTML = sequences.map((s,i)=>`
-        <div style="margin-bottom:10px;">
-            <button class="primary" onclick="startSequence(${i})">${s.name}</button>
-            <button class="danger" onclick="deleteSequence(${i})">Delete</button>
-        </div>
-    `).join('');
+// ===== Playback =====
+function setRadialProgress(percent) {
+    const circle = document.querySelector('.progress');
+    const radius = 70;
+    const circumference = 2 * Math.PI * radius;
+    circle.style.strokeDasharray = `${circumference}`;
+    circle.style.strokeDashoffset = `${circumference - percent * circumference}`;
 }
 
-function startSequence(i) {
+async function startSequence(i){
     currentSequence = sequences[i];
-    document.getElementById('playback').style.display = 'block';
-
+    playback.style.display='block';
     items = [...currentSequence.items];
     currentIndex = 0;
     timeLeft = currentSequence.duration;
-
-    updatePlaybackInfo();
+    updateInfo();
     playMedia(items[currentIndex]);
-    timer = setInterval(() => tick(), 1000);
+    timer = setInterval(tick,1000);
 }
 
-function tick() {
-    document.getElementById('countdown').textContent = timeLeft + 's';
+function updateInfo(){
+    playbackTitle.textContent = currentSequence.name;
+    repInfo.textContent = `${currentIndex+1} of ${items.length}`;
+}
 
-    if (timeLeft <= 0) {
+async function tick(){
+    timeText.textContent = timeLeft + "s";
+    setRadialProgress(timeLeft / currentSequence.duration);
+
+    if (timeLeft <= 0){
         currentIndex++;
-        if (currentIndex >= items.length) {
-            stopPlayback();
-            alert("Sequence Complete!");
-            return;
-        }
+        if (currentIndex >= items.length){ stopPlayback(); alert("Done!"); return; }
         timeLeft = currentSequence.duration;
         playMedia(items[currentIndex]);
-        updatePlaybackInfo();
+        updateInfo();
     }
-
     timeLeft--;
 }
 
-function updatePlaybackInfo() {
-    document.getElementById('playbackTitle').textContent = currentSequence.name;
-    document.getElementById('repInfo').textContent = `${currentIndex+1} of ${items.length}`;
+async function playMedia(item){
+    const record = await getMedia(item.id);
+    const url = URL.createObjectURL(record.blob);
+    mediaDisplay.innerHTML = item.type === "video" ? `<video src='${url}' autoplay loop></video>` : `<img src='${url}'>`;
 }
 
-function playMedia(item) {
-    const el = document.getElementById('mediaDisplay');
-
-    if (item.type === 'video') {
-        el.innerHTML = `<video src="${item.url}" autoplay loop></video>`;
-    } else {
-        el.innerHTML = `<img src="${item.url}" />`;
-    }
-}
-
-function stopPlayback() {
-    clearInterval(timer);
-    document.getElementById('playback').style.display = 'none';
-}
-
-loadSequences();
+function stopPlayback(){ clearInterval(timer); playback.style.display='none'; }
 </script>
 </body>
 </html>

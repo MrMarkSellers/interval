@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Interval Trainer (Simple Version w/ Timeline)</title>
+<style>
+    body { font-family: Arial, sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; }
+    h1 { text-align: center; }
+    .section { margin-bottom: 20px; padding: 15px; background: #222; border-radius: 10px; }
+    button { padding: 10px 18px; border: none; border-radius: 8px; cursor: pointer; }
+    .primary { background: #4caf50; color: #fff; }
+    .danger { background: #f44336; color: #fff; margin-left: 10px; }
+    input, select { padding: 10px; border-radius: 6px; border: none; }
+    #timeline .item { background: #333; padding: 10px; border-radius: 8px; margin: 6px 0; display: flex; align-items: center; justify-content: space-between; }
+    .drag { cursor: grab; font-size: 20px; margin-left: 10px; }
+    #mediaDisplay img, #mediaDisplay video { max-width: 100%; max-height: 80vh; display: block; margin: 0 auto; border-radius: 10px; }
+</style>
+</head>
+<body>
+<h1>Interval Trainer</h1>
+
+<div class="section">
+    <label>Duration per Interval:</label><br>
+    <select id="duration">
+        <option value="30">30 sec</option>
+        <option value="45">45 sec</option>
+        <option value="60">60 sec</option>
+    </select>
+
+    <br><br>
+    <label>Repetitions:</label><br>
+    <input id="reps" type="number" min="1" max="10" value="1" />
+</div>
+
+<div class="section">
+    <h2>Media (Match Repetitions)</h2>
+    <input type="file" id="fileInput" accept="image/*,video/*" />
+    <button class="primary" onclick="addMedia()">Add</button>
+
+    <h3>Timeline (Drag to Reorder)</h3>
+    <div id="timeline"></div>
+</div>
+
+<div class="section">
+    <h2>Save Sequence</h2>
+    <input id="seqName" placeholder="Sequence Name" />
+    <button class="primary" onclick="saveSequence()">Save</button>
+
+    <h3>Saved Sequences:</h3>
+    <div id="sequenceList"></div>
+</div>
+
+<div id="playback" class="section" style="display:none;">
+    <h2 id="playbackTitle">Playback</h2>
+    <div id="countdown" style="font-size:40px;"></div>
+    <div id="mediaDisplay"></div>
+    <div id="repInfo" style="margin-top:10px;"></div>
+    <button onclick="stopPlayback()">Stop</button>
+</div>
+
+<script>
+let items = [];
+let sequences = JSON.parse(localStorage.getItem("sequences") || "[]");
+let timer = null;
+let currentIndex = 0;
+let timeLeft = 0;
+let dragIndex = null;
+let currentSequence = null;
+
+function addMedia() {
+    const reps = parseInt(document.getElementById('reps').value);
+    if (items.length >= reps) return alert(`You may only add ${reps} items.`);
+
+    const file = document.getElementById('fileInput').files[0];
+    if (!file) return alert("Choose a file first.");
+
+    const url = URL.createObjectURL(file);
+    items.push({ type: file.type.startsWith('video') ? 'video' : 'photo', url, name: file.name });
+
+    renderTimeline();
+}
+
+function renderTimeline() {
+    const timeline = document.getElementById('timeline');
+    timeline.innerHTML = items.map((m,i)=>`
+        <div class="item" draggable="true" ondragstart="startDrag(${i})" ondragover="event.preventDefault()" ondrop="dropItem(${i})">
+            <span>${i+1}. Stage ${i+1} ${m.name}</span>
+            <div>
+                <button class="danger" onclick="deleteItem(${i})">Delete</button>
+                <span class="drag">☰</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function deleteItem(i) {
+    items.splice(i,1);
+    renderTimeline();
+}
+
+function startDrag(i) { dragIndex = i; }
+function dropItem(dropIndex) {
+    const moved = items.splice(dragIndex, 1)[0];
+    items.splice(dropIndex, 0, moved);
+    renderTimeline();
+}
+
+function saveSequence() {
+    const name = document.getElementById('seqName').value;
+    const duration = parseInt(document.getElementById('duration').value);
+    const reps = parseInt(document.getElementById('reps').value);
+
+    if (items.length !== reps) return alert("Media count must match repetitions!");
+
+    sequences.push({ name, duration, repetitions: reps, items: [...items] });
+    localStorage.setItem("sequences", JSON.stringify(sequences));
+
+    loadSequences();
+}
+
+function deleteSequence(i) {
+    sequences.splice(i,1);
+    localStorage.setItem("sequences", JSON.stringify(sequences));
+    loadSequences();
+}
+
+function loadSequences() {
+    const list = document.getElementById('sequenceList');
+    list.innerHTML = sequences.map((s,i)=>`
+        <div style="margin-bottom:10px;">
+            <button class="primary" onclick="startSequence(${i})">${s.name}</button>
+            <button class="danger" onclick="deleteSequence(${i})">Delete</button>
+        </div>
+    `).join('');
+}
+
+function startSequence(i) {
+    currentSequence = sequences[i];
+    document.getElementById('playback').style.display = 'block';
+
+    items = [...currentSequence.items];
+    currentIndex = 0;
+    timeLeft = currentSequence.duration;
+
+    updatePlaybackInfo();
+    playMedia(items[currentIndex]);
+    timer = setInterval(() => tick(), 1000);
+}
+
+function tick() {
+    document.getElementById('countdown').textContent = timeLeft + 's';
+
+    if (timeLeft <= 0) {
+        currentIndex++;
+        if (currentIndex >= items.length) {
+            stopPlayback();
+            alert("Sequence Complete!");
+            return;
+        }
+        timeLeft = currentSequence.duration;
+        playMedia(items[currentIndex]);
+        updatePlaybackInfo();
+    }
+
+    timeLeft--;
+}
+
+function updatePlaybackInfo() {
+    document.getElementById('playbackTitle').textContent = currentSequence.name;
+    document.getElementById('repInfo').textContent = `${currentIndex+1} of ${items.length}`;
+}
+
+function playMedia(item) {
+    const el = document.getElementById('mediaDisplay');
+
+    if (item.type === 'video') {
+        el.innerHTML = `<video src="${item.url}" autoplay loop></video>`;
+    } else {
+        el.innerHTML = `<img src="${item.url}" />`;
+    }
+}
+
+function stopPlayback() {
+    clearInterval(timer);
+    document.getElementById('playback').style.display = 'none';
+}
+
+loadSequences();
+</script>
+</body>
+</html>
